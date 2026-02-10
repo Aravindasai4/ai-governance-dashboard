@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title_suffix %} - Raw Data{% endblock %}
+{% block content %}
+<div id="error-banners"></div>
+<h2 class="section-title">Raw Data</h2>
+
+<div style="display:flex;gap:8px;margin-bottom:18px;">
+    <button class="btn" onclick="showTab('events')" id="btn-events">Events</button>
+    <button class="btn" onclick="showTab('decisions')" id="btn-decisions" style="opacity:0.6;">Decisions</button>
+    <button class="btn" onclick="showTab('alerts')" id="btn-alerts" style="opacity:0.6;">Alerts</button>
+</div>
+
+<div class="filter-bar">
+    <label>Limit:</label>
+    <select id="limit-select" onchange="reloadTab()">
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="200" selected>200</option>
+    </select>
+    <label style="margin-left:12px;">Filter:</label>
+    <input type="text" id="filter-input" placeholder="Type to filter..." oninput="filterTable()" style="width:240px;">
+</div>
+
+<div class="card">
+    <div class="card-body" style="padding:0;overflow-x:auto;max-height:600px;overflow-y:auto;">
+        <table id="data-table">
+            <thead id="data-thead"><tr><td class="loading">Loading...</td></tr></thead>
+            <tbody id="data-tbody"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentTab = 'events';
+let tableData = [];
+
+function showBanner(msg, isError) {
+    const d = document.getElementById('error-banners');
+    const b = document.createElement('div');
+    b.className = 'banner' + (isError ? ' banner-error' : '');
+    b.textContent = msg;
+    d.appendChild(b);
+}
+
+function showTab(tab) {
+    currentTab = tab;
+    ['events','decisions','alerts'].forEach(t => {
+        document.getElementById('btn-' + t).style.opacity = t === tab ? '1' : '0.6';
+    });
+    document.getElementById('filter-input').value = '';
+    reloadTab();
+}
+
+async function reloadTab() {
+    const limit = document.getElementById('limit-select').value;
+    const url = `/proxy/${currentTab}?limit=${limit}`;
+    const thead = document.getElementById('data-thead');
+    const tbody = document.getElementById('data-tbody');
+    thead.innerHTML = '<tr><td class="loading">Loading...</td></tr>';
+    tbody.innerHTML = '';
+
+    try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (data.error) { showBanner('Error: ' + data.error, true); thead.innerHTML = ''; return; }
+        const items = Array.isArray(data) ? data : (data[currentTab] || data.items || data.data || []);
+        tableData = items;
+        renderTable(items);
+    } catch(e) {
+        showBanner('Source missing endpoint: /api/' + currentTab + ' — ' + e.message, true);
+        thead.innerHTML = '';
+    }
+}
+
+function renderTable(items) {
+    const thead = document.getElementById('data-thead');
+    const tbody = document.getElementById('data-tbody');
+    if (!items.length) { thead.innerHTML = '<tr><td class="loading">No data</td></tr>'; tbody.innerHTML = ''; return; }
+    const keys = Object.keys(items[0]);
+    thead.innerHTML = '<tr>' + keys.map(k => `<th>${k}</th>`).join('') + '</tr>';
+    tbody.innerHTML = items.map(row => {
+        return '<tr>' + keys.map(k => {
+            let v = row[k];
+            if (v === null || v === undefined) v = '';
+            if (typeof v === 'object') v = JSON.stringify(v);
+            if (k === 'decision' || k === 'outcome') {
+                const cls = v === 'approve' ? 'pill-approve' : v === 'reject' ? 'pill-reject' : 'pill-review';
+                return `<td><span class="pill ${cls}">${v}</span></td>`;
+            }
+            if (k === 'severity' || k === 'level') {
+                const cls = v === 'critical' ? 'pill-critical' : v === 'warning' ? 'pill-warning' : 'pill-info';
+                return `<td><span class="pill ${cls}">${v}</span></td>`;
+            }
+            const str = String(v);
+            return `<td title="${str}">${str.length > 60 ? str.slice(0,60) + '...' : str}</td>`;
+        }).join('') + '</tr>';
+    }).join('');
+}
+
+function filterTable() {
+    const q = document.getElementById('filter-input').value.toLowerCase();
+    if (!q) { renderTable(tableData); return; }
+    const filtered = tableData.filter(row => Object.values(row).some(v => String(v).toLowerCase().includes(q)));
+    renderTable(filtered);
+}
+
+showTab('events');
+</script>
+{% endblock %}

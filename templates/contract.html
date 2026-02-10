@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title_suffix %} - Contract{% endblock %}
+{% block content %}
+<div id="error-banners"></div>
+<h2 class="section-title">AI Decision Contract</h2>
+<div id="contract-container">
+    <div class="loading">Loading contract...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showBanner(msg, isError) {
+    const d = document.getElementById('error-banners');
+    const b = document.createElement('div');
+    b.className = 'banner' + (isError ? ' banner-error' : '');
+    b.textContent = msg;
+    d.appendChild(b);
+}
+
+function renderValue(val, depth) {
+    if (val === null || val === undefined) return '<span style="color:var(--text-dim)">null</span>';
+    if (typeof val === 'boolean') return `<span style="color:var(--accent-purple)">${val}</span>`;
+    if (typeof val === 'number') return `<span style="color:var(--accent-orange)">${val}</span>`;
+    if (typeof val === 'string') return `<span style="color:var(--accent-green)">"${val}"</span>`;
+    if (Array.isArray(val)) {
+        if (val.length === 0) return '<span style="color:var(--text-dim)">[]</span>';
+        if (val.every(v => typeof v !== 'object')) {
+            return val.map(v => `<span class="pill pill-info" style="margin:2px;">${v}</span>`).join(' ');
+        }
+        return val.map(v => renderValue(v, depth + 1)).join('');
+    }
+    if (typeof val === 'object') return renderSection(val, depth + 1);
+    return String(val);
+}
+
+function renderSection(obj, depth) {
+    if (!obj || typeof obj !== 'object') return '';
+    let html = '';
+    for (const [key, val] of Object.entries(obj)) {
+        const isObj = val && typeof val === 'object' && !Array.isArray(val);
+        const id = 'section-' + Math.random().toString(36).slice(2);
+        if (isObj) {
+            html += `<div class="card" style="margin-bottom:12px;margin-left:${depth * 12}px;">
+                <div class="collapsible-header" onclick="document.getElementById('${id}').classList.toggle('open')">
+                    <span>${key}</span>
+                    <span style="color:var(--text-dim);font-size:12px;">&#9662;</span>
+                </div>
+                <div class="collapsible-body open" id="${id}">${renderSection(val, depth + 1)}</div>
+            </div>`;
+        } else {
+            html += `<div style="padding:8px 14px;border-bottom:1px solid rgba(48,54,61,0.3);margin-left:${depth * 12}px;">
+                <span style="color:var(--text-muted);font-weight:600;font-size:13px;">${key}:</span> ${renderValue(val, depth)}
+            </div>`;
+        }
+    }
+    return html;
+}
+
+async function loadContract() {
+    const container = document.getElementById('contract-container');
+    try {
+        const resp = await fetch('/proxy/contract');
+        const data = await resp.json();
+        if (data.error) { showBanner('Error: ' + data.error, true); container.innerHTML = ''; return; }
+        container.innerHTML = renderSection(data, 0);
+    } catch(e) {
+        showBanner('Source missing endpoint: /api/contract — ' + e.message, true);
+        container.innerHTML = '';
+    }
+}
+
+loadContract();
+</script>
+{% endblock %}

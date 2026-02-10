@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title_suffix %} - Settings{% endblock %}
+{% block content %}
+<h2 class="section-title">Settings</h2>
+
+<div class="card" style="max-width:640px;">
+    <div class="card-header">Source Configuration</div>
+    <div class="card-body">
+        <form method="POST" action="/settings">
+            <div style="margin-bottom:16px;">
+                <label style="font-size:13px;color:var(--text-muted);display:block;margin-bottom:6px;">Source Base URL</label>
+                <input type="url" name="source_base_url" value="{{ current_url }}" placeholder="{{ default_url }}" style="margin-bottom:8px;">
+                <div style="font-size:12px;color:var(--text-dim);">Default: {{ default_url }}</div>
+            </div>
+            <button type="submit" class="btn">Save</button>
+        </form>
+    </div>
+</div>
+
+<div class="card" style="max-width:640px;margin-top:18px;">
+    <div class="card-header">Connection Status</div>
+    <div class="card-body" id="connection-status">
+        <div class="loading">Checking connection...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function checkConnection() {
+    const el = document.getElementById('connection-status');
+    const endpoints = [
+        { name: 'Contract', url: '/proxy/contract' },
+        { name: 'Measure Summary', url: '/proxy/measure_summary?window=24h' },
+        { name: 'Decisions', url: '/proxy/decisions?limit=1' },
+        { name: 'Events', url: '/proxy/events?limit=1' },
+        { name: 'Alerts', url: '/proxy/alerts?limit=1' }
+    ];
+
+    let html = '';
+    for (const ep of endpoints) {
+        try {
+            const resp = await fetch(ep.url);
+            const data = await resp.json();
+            if (data.error) {
+                html += `<div style="padding:8px 0;display:flex;justify-content:space-between;border-bottom:1px solid rgba(48,54,61,0.5);">
+                    <span>${ep.name}</span><span class="pill pill-critical">Error</span>
+                </div>`;
+            } else {
+                html += `<div style="padding:8px 0;display:flex;justify-content:space-between;border-bottom:1px solid rgba(48,54,61,0.5);">
+                    <span>${ep.name}</span><span class="pill pill-approve">OK</span>
+                </div>`;
+            }
+        } catch(e) {
+            html += `<div style="padding:8px 0;display:flex;justify-content:space-between;border-bottom:1px solid rgba(48,54,61,0.5);">
+                <span>${ep.name}</span><span class="pill pill-critical">Failed</span>
+            </div>`;
+        }
+    }
+    el.innerHTML = html;
+}
+
+checkConnection();
+</script>
+{% endblock %}

@@ -1,0 +1,325 @@
+{% extends "base.html" %}
+{% block title_suffix %} - Dashboard{% endblock %}
+{% block content %}
+<div id="error-banners"></div>
+
+<div class="kpi-grid" id="kpi-grid">
+    <div class="kpi-card"><div class="kpi-label">Total (24h)</div><div class="kpi-value" id="kpi-total">--</div><div class="kpi-sub">decisions</div></div>
+    <div class="kpi-card"><div class="kpi-label">Review Rate (24h)</div><div class="kpi-value" id="kpi-review-rate">--</div><div class="kpi-sub">of decisions</div></div>
+    <div class="kpi-card"><div class="kpi-label">Human Overrides (7d)</div><div class="kpi-value" id="kpi-overrides">--</div><div class="kpi-sub">overrides</div></div>
+    <div class="kpi-card"><div class="kpi-label">Slips (7d)</div><div class="kpi-value" id="kpi-slips">--</div><div class="kpi-sub">slips</div></div>
+    <div class="kpi-card"><div class="kpi-label">Corrections (7d)</div><div class="kpi-value" id="kpi-corrections">--</div><div class="kpi-sub">corrections</div></div>
+    <div class="kpi-card"><div class="kpi-label">Avg Risk (7d)</div><div class="kpi-value" id="kpi-avg-risk">--</div><div class="kpi-sub">risk score</div></div>
+    <div class="kpi-card"><div class="kpi-label">Max Risk (7d)</div><div class="kpi-value" id="kpi-max-risk">--</div><div class="kpi-sub">risk score</div></div>
+    <div class="kpi-card"><div class="kpi-label">Pending Review</div><div class="kpi-value" id="kpi-pending">--</div><div class="kpi-sub">in queue</div></div>
+</div>
+
+<div class="dashboard-layout">
+    <div>
+        <div class="charts-grid">
+            <div class="card">
+                <div class="card-header">Decisions per Hour (24h)</div>
+                <div class="card-body"><div class="chart-container"><canvas id="chart-hourly"></canvas></div></div>
+            </div>
+            <div class="card">
+                <div class="card-header">Decisions per Day (7d)</div>
+                <div class="card-body"><div class="chart-container"><canvas id="chart-daily"></canvas></div></div>
+            </div>
+            <div class="card">
+                <div class="card-header">Top Reason Codes (7d)</div>
+                <div class="card-body"><div class="chart-container"><canvas id="chart-reasons"></canvas></div></div>
+            </div>
+            <div class="card">
+                <div class="card-header">Drift: Credit Score & DTI (7d)</div>
+                <div class="card-body"><div class="chart-container"><canvas id="chart-drift"></canvas></div></div>
+            </div>
+        </div>
+        <div class="charts-grid">
+            <div class="card">
+                <div class="card-header">Review Rate vs Baseline</div>
+                <div class="card-body">
+                    <div class="gauge-container" id="gauge-container">
+                        <div class="kpi-label">Current Review Rate</div>
+                        <div class="gauge-value" id="gauge-value">--</div>
+                        <div class="gauge-bar"><div class="gauge-fill" id="gauge-fill" style="width:0%;background:var(--accent-green)"></div></div>
+                        <div class="gauge-thresholds"><span>0%</span><span>15%</span><span>30%</span><span>50%+</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">Recent Decisions</div>
+                <div class="card-body" style="padding:0;max-height:320px;overflow-y:auto;">
+                    <table id="recent-decisions-table">
+                        <thead><tr><th>ID</th><th>Decision</th><th>Risk</th><th>Engine</th></tr></thead>
+                        <tbody id="recent-decisions-body"><tr><td colspan="4" class="loading">Loading...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div>
+        <div class="card" style="margin-bottom:18px;">
+            <div class="card-header">Alerts</div>
+            <div class="alerts-panel" id="alerts-panel">
+                <div class="loading">Loading alerts...</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">Drift Deltas (7d)</div>
+            <div id="drift-deltas">
+                <div class="loading">Loading drift data...</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const chartDefaults = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#8b949e', font: { size: 11 } } } },
+    scales: {
+        x: { ticks: { color: '#6e7681', font: { size: 10 } }, grid: { color: 'rgba(48,54,61,0.4)' } },
+        y: { ticks: { color: '#6e7681', font: { size: 10 } }, grid: { color: 'rgba(48,54,61,0.4)' } }
+    }
+};
+
+function showBanner(msg, isError) {
+    const d = document.getElementById('error-banners');
+    const b = document.createElement('div');
+    b.className = 'banner' + (isError ? ' banner-error' : '');
+    b.textContent = msg;
+    d.appendChild(b);
+}
+
+function decisionPill(d) {
+    const v = (d || '').toLowerCase();
+    const cls = v === 'approve' ? 'pill-approve' : v === 'reject' ? 'pill-reject' : 'pill-review';
+    return `<span class="pill ${cls}">${d || 'unknown'}</span>`;
+}
+
+function riskPill(r) {
+    const v = parseFloat(r) || 0;
+    const cls = v < 0.3 ? 'pill-low' : v < 0.6 ? 'pill-medium' : 'pill-high';
+    return `<span class="pill ${cls}">${v.toFixed(2)}</span>`;
+}
+
+function severityPill(s) {
+    const sv = (s || '').toLowerCase();
+    const cls = sv === 'critical' || sv === 'error' ? 'pill-critical' : sv === 'warn' || sv === 'warning' ? 'pill-warning' : 'pill-info';
+    return `<span class="pill ${cls}">${s || 'info'}</span>`;
+}
+
+async function fetchJSON(url) {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+}
+
+async function loadDashboard() {
+    let s24 = {}, s7 = {}, alerts = [], decisions = [];
+    try { s24 = await fetchJSON('/proxy/measure_summary?window=24h'); } catch(e) { showBanner('Source missing endpoint: /api/measure/summary?window=24h — ' + e.message, true); }
+    try { s7 = await fetchJSON('/proxy/measure_summary?window=7d'); } catch(e) { showBanner('Source missing endpoint: /api/measure/summary?window=7d — ' + e.message, true); }
+    try { const a = await fetchJSON('/proxy/alerts?limit=50'); alerts = Array.isArray(a) ? a : (a.alerts || []); } catch(e) { showBanner('Source missing endpoint: /api/alerts — ' + e.message, true); }
+    try { const d = await fetchJSON('/proxy/decisions?limit=200'); decisions = Array.isArray(d) ? d : (d.decisions || []); } catch(e) { showBanner('Source missing endpoint: /api/decisions — ' + e.message, true); }
+
+    document.getElementById('kpi-total').textContent = s24.total || 0;
+    const rr = s24.review_rate || 0;
+    const rrPct = rr > 1 ? rr : rr * 100;
+    document.getElementById('kpi-review-rate').textContent = rrPct.toFixed(1) + '%';
+    document.getElementById('kpi-overrides').textContent = s7.human_overrides || 0;
+    document.getElementById('kpi-slips').textContent = s7.slips || 0;
+    document.getElementById('kpi-corrections').textContent = s7.corrections || 0;
+    document.getElementById('kpi-avg-risk').textContent = typeof s7.avg_risk === 'number' ? s7.avg_risk.toFixed(3) : '--';
+    document.getElementById('kpi-max-risk').textContent = typeof s7.max_risk === 'number' ? s7.max_risk.toFixed(3) : '--';
+    document.getElementById('kpi-pending').textContent = s24.pending_review || s7.pending_review || 0;
+
+    document.getElementById('gauge-value').textContent = rrPct.toFixed(1) + '%';
+    const gaugePct = Math.min(rrPct / 50 * 100, 100);
+    const gf = document.getElementById('gauge-fill');
+    gf.style.width = gaugePct + '%';
+    gf.style.background = rrPct < 15 ? 'var(--accent-green)' : rrPct < 30 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+
+    buildHourlyChart(decisions);
+    buildDailyChart(decisions);
+    buildReasonsChart(s7);
+    buildDriftChart(decisions);
+    buildAlertsPanel(alerts);
+    buildDriftDeltas(s7);
+    buildDecisionsTable(decisions.slice(0, 20));
+}
+
+function buildHourlyChart(decisions) {
+    const now = new Date();
+    const h24ago = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const recent = decisions.filter(d => new Date(d.created_at) >= h24ago);
+    const buckets = {};
+    for (let i = 0; i < 24; i++) {
+        const t = new Date(h24ago.getTime() + i * 60 * 60 * 1000);
+        const key = t.toISOString().slice(0, 13);
+        buckets[key] = { approve: 0, review: 0, reject: 0 };
+    }
+    recent.forEach(d => {
+        const key = (d.created_at || '').slice(0, 13);
+        if (!buckets[key]) buckets[key] = { approve: 0, review: 0, reject: 0 };
+        const dec = (d.decision || '').toLowerCase();
+        if (dec === 'approve') buckets[key].approve++;
+        else if (dec === 'reject') buckets[key].reject++;
+        else buckets[key].review++;
+    });
+    const sorted = Object.entries(buckets).sort((a, b) => a[0].localeCompare(b[0]));
+    const labels = sorted.map(([k]) => k.slice(5) + ':00');
+    new Chart(document.getElementById('chart-hourly'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                { label: 'Approve', data: sorted.map(([, v]) => v.approve), borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
+                { label: 'Review', data: sorted.map(([, v]) => v.review), borderColor: '#d29922', backgroundColor: 'rgba(210,153,34,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
+                { label: 'Reject', data: sorted.map(([, v]) => v.reject), borderColor: '#f85149', backgroundColor: 'rgba(248,81,73,0.1)', fill: true, tension: 0.3, pointRadius: 2 }
+            ]
+        },
+        options: { ...chartDefaults }
+    });
+}
+
+function buildDailyChart(decisions) {
+    const now = new Date();
+    const d7ago = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const buckets = {};
+    for (let i = 0; i < 7; i++) {
+        const t = new Date(d7ago.getTime() + i * 24 * 60 * 60 * 1000);
+        const key = t.toISOString().slice(0, 10);
+        buckets[key] = { approve: 0, review: 0, reject: 0 };
+    }
+    decisions.forEach(d => {
+        const key = (d.created_at || '').slice(0, 10);
+        if (!buckets[key]) buckets[key] = { approve: 0, review: 0, reject: 0 };
+        const dec = (d.decision || '').toLowerCase();
+        if (dec === 'approve') buckets[key].approve++;
+        else if (dec === 'reject') buckets[key].reject++;
+        else buckets[key].review++;
+    });
+    const sorted = Object.entries(buckets).sort((a, b) => a[0].localeCompare(b[0]));
+    new Chart(document.getElementById('chart-daily'), {
+        type: 'bar',
+        data: {
+            labels: sorted.map(([k]) => k),
+            datasets: [
+                { label: 'Approve', data: sorted.map(([, v]) => v.approve), backgroundColor: '#3fb950' },
+                { label: 'Review', data: sorted.map(([, v]) => v.review), backgroundColor: '#d29922' },
+                { label: 'Reject', data: sorted.map(([, v]) => v.reject), backgroundColor: '#f85149' }
+            ]
+        },
+        options: { ...chartDefaults, scales: { ...chartDefaults.scales, x: { ...chartDefaults.scales.x, stacked: true }, y: { ...chartDefaults.scales.y, stacked: true } } }
+    });
+}
+
+function buildReasonsChart(data) {
+    const reasons = data.top_reason_codes || data.top_reasons || [];
+    const labels = reasons.map(r => r.code || r.reason || r.name || '');
+    const vals = reasons.map(r => r.count || r.total || 0);
+    const colors = ['#58a6ff', '#bc8cff', '#f0883e', '#3fb950', '#f85149', '#d29922'];
+    new Chart(document.getElementById('chart-reasons'), {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{ label: 'Occurrences', data: vals, backgroundColor: colors.slice(0, vals.length) }]
+        },
+        options: { ...chartDefaults, indexAxis: 'y', plugins: { ...chartDefaults.plugins, legend: { display: false } } }
+    });
+}
+
+function buildDriftChart(decisions) {
+    const now = new Date();
+    const d7ago = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const buckets = {};
+    decisions.forEach(d => {
+        const key = (d.created_at || '').slice(0, 10);
+        if (!buckets[key]) buckets[key] = { credits: [], dtis: [] };
+        if (d.credit_score) buckets[key].credits.push(d.credit_score);
+        const dti = d.loan_amount && d.annual_income ? d.loan_amount / d.annual_income : null;
+        if (dti) buckets[key].dtis.push(dti);
+    });
+    const sorted = Object.entries(buckets).sort((a, b) => a[0].localeCompare(b[0]));
+    const labels = sorted.map(([k]) => k);
+    const avgCredits = sorted.map(([, v]) => v.credits.length ? v.credits.reduce((a, b) => a + b, 0) / v.credits.length : null);
+    const avgDtis = sorted.map(([, v]) => v.dtis.length ? v.dtis.reduce((a, b) => a + b, 0) / v.dtis.length : null);
+    new Chart(document.getElementById('chart-drift'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                { label: 'Avg Credit Score', data: avgCredits, borderColor: '#bc8cff', tension: 0.3, pointRadius: 4, yAxisID: 'y' },
+                { label: 'Avg DTI Proxy', data: avgDtis, borderColor: '#f0883e', tension: 0.3, pointRadius: 4, yAxisID: 'y1' }
+            ]
+        },
+        options: {
+            ...chartDefaults,
+            scales: {
+                x: chartDefaults.scales.x,
+                y: { ...chartDefaults.scales.y, title: { display: true, text: 'Credit Score', color: '#8b949e' } },
+                y1: { position: 'right', ticks: { color: '#6e7681' }, grid: { display: false }, title: { display: true, text: 'DTI', color: '#8b949e' } }
+            }
+        }
+    });
+}
+
+function buildAlertsPanel(alerts) {
+    const panel = document.getElementById('alerts-panel');
+    if (!alerts.length) { panel.innerHTML = '<div class="loading">No alerts</div>'; return; }
+    panel.innerHTML = alerts.map(a => `
+        <div class="alert-item">
+            ${severityPill(a.severity)} 
+            <span style="color:var(--text-dim);font-size:11px;">${a.created_at || ''}</span><br>
+            <span style="margin-top:4px;display:inline-block;">${a.message || a.alert_type || ''}</span>
+        </div>
+    `).join('');
+}
+
+function buildDriftDeltas(data) {
+    const drift = data.drift || {};
+    const el = document.getElementById('drift-deltas');
+    if (!Object.keys(drift).length) { el.innerHTML = '<div class="loading">No drift data</div>'; return; }
+
+    const items = [
+        { label: 'Credit Score', val: drift.credit_avg, baseline: drift.credit_baseline, shift: drift.credit_shift, unit: '' },
+        { label: 'Income', val: drift.income_avg, baseline: drift.income_baseline, shift: drift.income_shift_pct, unit: '%', pct: true },
+        { label: 'DTI Ratio', val: drift.dti_avg, baseline: drift.dti_baseline, shift: drift.dti_shift, unit: '' }
+    ];
+
+    el.innerHTML = items.map(item => {
+        if (item.shift === undefined || item.shift === null) {
+            return `<div class="drift-row"><span>${item.label}</span><span class="pill pill-info">N/A</span></div>`;
+        }
+        const abs = Math.abs(item.pct ? item.shift : (item.baseline ? item.shift / item.baseline : item.shift));
+        const cls = abs < 0.05 ? 'pill-low' : abs < 0.15 ? 'pill-medium' : 'pill-high';
+        const display = item.pct ? (item.shift * 100).toFixed(1) + '%' : (item.shift > 0 ? '+' : '') + (typeof item.shift === 'number' ? item.shift.toFixed(2) : item.shift);
+        const detail = item.val !== undefined ? ` (${typeof item.val === 'number' ? item.val.toFixed(1) : item.val} vs ${typeof item.baseline === 'number' ? item.baseline.toFixed(1) : item.baseline})` : '';
+        return `<div class="drift-row">
+            <span>${item.label}<span style="color:var(--text-dim);font-size:11px;">${detail}</span></span>
+            <span class="pill ${cls}">${display}</span>
+        </div>`;
+    }).join('');
+}
+
+function buildDecisionsTable(decisions) {
+    const body = document.getElementById('recent-decisions-body');
+    if (!decisions.length) { body.innerHTML = '<tr><td colspan="4" class="loading">No decisions</td></tr>'; return; }
+    body.innerHTML = decisions.map(d => {
+        const id = d.decision_id || d.id || '';
+        return `<tr>
+            <td><a href="https://loan-decision-contract.replit.app/decision/${id}" target="_blank" title="View decision ${id}">#${id}</a></td>
+            <td>${decisionPill(d.decision)}</td>
+            <td>${riskPill(d.risk_score)}</td>
+            <td><span style="color:var(--text-muted);font-size:12px;">${d.engine_version || ''}</span></td>
+        </tr>`;
+    }).join('');
+}
+
+loadDashboard();
+</script>
+{% endblock %}

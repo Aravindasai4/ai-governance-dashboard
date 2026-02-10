@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title_suffix %} - Measure{% endblock %}
+{% block content %}
+<div id="error-banners"></div>
+<h2 class="section-title">Metrics & Measures</h2>
+
+<div class="filter-bar">
+    <label>Window:</label>
+    <select id="window-select" onchange="loadMeasure()">
+        <option value="24h">24 Hours</option>
+        <option value="7d" selected>7 Days</option>
+        <option value="all">All Time</option>
+    </select>
+</div>
+
+<div class="kpi-grid" id="measure-kpis" style="margin-bottom:24px;">
+    <div class="kpi-card"><div class="kpi-label">Total Decisions</div><div class="kpi-value" id="m-total">--</div></div>
+    <div class="kpi-card"><div class="kpi-label">Review Rate</div><div class="kpi-value" id="m-review-rate">--</div></div>
+    <div class="kpi-card"><div class="kpi-label">Slips</div><div class="kpi-value" id="m-slips">--</div></div>
+    <div class="kpi-card"><div class="kpi-label">Corrections</div><div class="kpi-value" id="m-corrections">--</div></div>
+    <div class="kpi-card"><div class="kpi-label">Human Overrides</div><div class="kpi-value" id="m-overrides">--</div></div>
+    <div class="kpi-card"><div class="kpi-label">Avg Risk</div><div class="kpi-value" id="m-avg-risk">--</div></div>
+    <div class="kpi-card"><div class="kpi-label">Max Risk</div><div class="kpi-value" id="m-max-risk">--</div></div>
+    <div class="kpi-card"><div class="kpi-label">Pending Reviews</div><div class="kpi-value" id="m-pending">--</div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:24px;">
+    <div class="card">
+        <div class="card-header">Metric Definitions</div>
+        <div class="card-body" style="padding:0;">
+            <div class="metric-def">
+                <div class="metric-name">Slip</div>
+                <div class="metric-desc">A decision that was approved by the engine but later found to be problematic. Indicates false negatives in the model.</div>
+            </div>
+            <div class="metric-def">
+                <div class="metric-name">Correction</div>
+                <div class="metric-desc">A decision that was rejected or flagged for review by the engine but later found to be acceptable. Indicates false positives.</div>
+            </div>
+            <div class="metric-def">
+                <div class="metric-name">Human Override</div>
+                <div class="metric-desc">Any decision where a human reviewer changed the engine's original recommendation. Tracks human-in-the-loop activity.</div>
+            </div>
+            <div class="metric-def">
+                <div class="metric-name">Review Rate</div>
+                <div class="metric-desc">Percentage of total decisions that were flagged for human review. Calculated as: (review decisions / total decisions) * 100.</div>
+            </div>
+            <div class="metric-def">
+                <div class="metric-name">Drift</div>
+                <div class="metric-desc">Change in input feature distributions over time compared to training data. Monitored for credit score, income, and DTI ratio.</div>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-header">Data Quality</div>
+        <div class="card-body" id="data-quality">
+            <div class="loading">Loading data quality metrics...</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Full Summary Response</div>
+    <div class="card-body">
+        <pre id="raw-summary" style="font-size:12px;color:var(--text-muted);white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto;">Loading...</pre>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showBanner(msg, isError) {
+    const d = document.getElementById('error-banners');
+    const b = document.createElement('div');
+    b.className = 'banner' + (isError ? ' banner-error' : '');
+    b.textContent = msg;
+    d.appendChild(b);
+}
+
+function safeGet(obj, path, def) {
+    const keys = path.split('.');
+    let v = obj;
+    for (const k of keys) { v = v?.[k]; if (v === undefined) return def; }
+    return v;
+}
+
+async function loadMeasure() {
+    const window = document.getElementById('window-select').value;
+    let data;
+    try {
+        const resp = await fetch(`/proxy/measure_summary?window=${window}`);
+        data = await resp.json();
+        if (data.error) throw new Error(data.error);
+    } catch(e) {
+        showBanner('Error loading measure summary: ' + e.message, true);
+        return;
+    }
+
+    document.getElementById('m-total').textContent = data.total || '--';
+    const rr = data.review_rate || 0;
+    const rrVal = typeof rr === 'number' ? (rr > 1 ? rr : rr * 100) : 0;
+    document.getElementById('m-review-rate').textContent = rrVal.toFixed(1) + '%';
+    document.getElementById('m-slips').textContent = data.slips || 0;
+    document.getElementById('m-corrections').textContent = data.corrections || 0;
+    document.getElementById('m-overrides').textContent = data.human_overrides || 0;
+    document.getElementById('m-avg-risk').textContent = typeof data.avg_risk === 'number' ? data.avg_risk.toFixed(3) : '--';
+    document.getElementById('m-max-risk').textContent = typeof data.max_risk === 'number' ? data.max_risk.toFixed(3) : '--';
+    document.getElementById('m-pending').textContent = data.pending_review || 0;
+
+    document.getElementById('raw-summary').textContent = JSON.stringify(data, null, 2);
+
+    loadDataQuality(data);
+}
+
+async function loadDataQuality(summaryData) {
+    const el = document.getElementById('data-quality');
+    let decisions = [];
+    let events = [];
+    try {
+        const dResp = await fetch('/proxy/decisions?limit=200');
+        const dData = await dResp.json();
+        decisions = Array.isArray(dData) ? dData : (dData.decisions || []);
+    } catch(e) {}
+    try {
+        const eResp = await fetch('/proxy/events?limit=200');
+        const eData = await eResp.json();
+        events = Array.isArray(eData) ? eData : (eData.events || []);
+    } catch(e) {}
+
+    const totalD = decisions.length;
+    const missingReasons = decisions.filter(d => !d.reasons_json && !d.reasons && !d.reason_codes).length;
+    const reasonsPct = totalD > 0 ? ((missingReasons / totalD) * 100).toFixed(1) : 'N/A';
+
+    const totalE = events.length;
+    const missingDecisionId = events.filter(e => !e.decision_id).length;
+    const eventsPct = totalE > 0 ? ((missingDecisionId / totalE) * 100).toFixed(1) : 'N/A';
+
+    el.innerHTML = `
+        <div class="metric-def">
+            <div class="metric-name">Decisions Missing Reasons</div>
+            <div class="metric-desc">${missingReasons} of ${totalD} decisions have no reasons_json</div>
+            <div class="metric-value-inline">${reasonsPct}%</div>
+        </div>
+        <div class="metric-def">
+            <div class="metric-name">Events Missing Decision ID</div>
+            <div class="metric-desc">${missingDecisionId} of ${totalE} events have no decision_id</div>
+            <div class="metric-value-inline">${eventsPct}%</div>
+        </div>
+    `;
+}
+
+loadMeasure();
+</script>
+{% endblock %}
