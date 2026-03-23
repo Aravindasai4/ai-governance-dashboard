@@ -119,12 +119,18 @@ async function loadDataQuality(summaryData) {
         const dResp = await fetch('/proxy/decisions?limit=200');
         const dData = await dResp.json();
         decisions = Array.isArray(dData) ? dData : (dData.decisions || []);
-    } catch(e) {}
+    } catch(e) { 
+        el.innerHTML = '<div class="metric-def"><div class="metric-name" style="color:var(--accent-red)">Data quality check failed</div><div class="metric-desc">' + e.message + '</div></div>';
+        return;
+    }
     try {
         const eResp = await fetch('/proxy/events?limit=200');
         const eData = await eResp.json();
         events = Array.isArray(eData) ? eData : (eData.events || []);
-    } catch(e) {}
+    } catch(e) {
+        el.innerHTML = '<div class="metric-def"><div class="metric-name" style="color:var(--accent-red)">Data quality check failed</div><div class="metric-desc">' + e.message + '</div></div>';
+        return;
+    }
 
     const totalD = decisions.length;
     const missingReasons = decisions.filter(d => !d.reasons_json && !d.reasons && !d.reason_codes).length;

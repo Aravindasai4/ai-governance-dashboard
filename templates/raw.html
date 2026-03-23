@@ -94,7 +94,9 @@ function renderTable(items) {
                 return `<td><span class="pill ${cls}">${v}</span></td>`;
             }
             const str = String(v);
-            return `<td title="${str}">${str.length > 60 ? str.slice(0,60) + '...' : str}</td>`;
+            function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+            const safe = esc(str);
+            return `<td title="${safe}">${safe.length > 60 ? safe.slice(0,60) + '...' : safe}</td>`;
         }).join('') + '</tr>';
     }).join('');
 }
