@@ -1,6 +1,6 @@
 # AI Governance Dashboard for Loan Decision Systems
 
-A production-grade observability and governance platform for monitoring automated AI loan decision systems. Provides real-time transparency into decision quality, data drift, human oversight effectiveness, and regulatory compliance.
+A governance observability dashboard for monitoring automated AI loan decision systems — built to demonstrate real-world implementation of AI risk management principles in a financial services context.
 
 ## Overview
 
