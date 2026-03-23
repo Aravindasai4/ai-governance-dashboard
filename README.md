@@ -12,8 +12,6 @@ This dashboard addresses critical gaps in AI governance for high-stakes automate
 - **Undetected Errors**: Continuous measurement of false positive and false negative rates in production
 - **Contract Drift**: Live inspection of decision contracts to verify operational compliance
 
-Built as a governance layer over an AI loan simulator, this system demonstrates end-to-end implementation of AI risk management principles in a financial services context.
-
 ## Key Features
 
 ### Decision Observability
@@ -186,7 +184,7 @@ Measures completeness of decision explanations and event-decision linkage. Valid
 
 ## Technical Achievements
 
-- **Zero-dependency frontend**: Production-grade dashboard with no build step, no npm, no framework
+- **Zero-dependency frontend**: Full dashboard with no build step, no npm, no framework — vanilla JS and CSS only
 - **Real-time aggregation**: Client-side time-series bucketing from raw records
 - **Structured observability**: Differentiated error handling across timeout, connection, HTTP, and parse failures
 - **Governance-first design**: Every feature maps to specific AI risk management principle
@@ -211,7 +209,6 @@ Measures completeness of decision explanations and event-decision linkage. Valid
 ```
 ai-governance-dashboard/
 ├── main.py                 # Flask app + proxy layer
-├── governance.db          # SQLite settings store
 ├── templates/
 │   ├── base.html         # Design system + nav
 │   ├── dashboard.html    # Main observability view
