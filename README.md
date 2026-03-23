@@ -188,7 +188,7 @@ Measures completeness of decision explanations and event-decision linkage. Valid
 
 - **Zero-dependency frontend**: Production-grade dashboard with no build step, no npm, no framework
 - **Real-time aggregation**: Client-side time-series bucketing from raw records
-- **Structured observability**: Enterprise-grade error handling and diagnostics
+- **Structured observability**: Differentiated error handling across timeout, connection, HTTP, and parse failures
 - **Governance-first design**: Every feature maps to specific AI risk management principle
 
 ## Future Enhancements
